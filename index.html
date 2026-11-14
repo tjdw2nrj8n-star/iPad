@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>iPad Test</title>
+<style>
+  body { font-family: Helvetica, Arial, sans-serif; background: #111; color: #eee; margin: 0; padding: 24px; }
+  h1 { font-size: 32px; margin: 0 0 8px 0; }
+  .sub { color: #999; font-size: 18px; margin-bottom: 24px; }
+  .box { background: #222; border-radius: 12px; padding: 18px; margin-bottom: 16px; }
+  .label { font-size: 22px; font-weight: bold; }
+  .detail { font-size: 16px; color: #aaa; margin-top: 6px; word-wrap: break-word; }
+  .status { float: right; font-size: 22px; font-weight: bold; }
+  .wait { color: #fc3; }
+  .ok { color: #4c4; }
+  .fail { color: #f55; }
+  #clock { font-size: 56px; }
+  #summary { font-size: 20px; line-height: 1.4; }
+  button { font-size: 20px; padding: 12px 24px; border-radius: 8px; border: 0; background: #357; color: #fff; }
+</style>
+</head>
+<body>
+
+<h1>iPad connection test</h1>
+<div class="sub" id="env"></div>
+
+<div class="box">
+  <div class="label">1. JavaScript and clock</div>
+  <div id="clock">--:--:--</div>
+  <div class="detail">If the seconds are ticking, JavaScript works.</div>
+</div>
+
+<div class="box">
+  <span class="status wait" id="s1">Testing...</span>
+  <div class="label">2. Weather (Open-Meteo, HTTPS)</div>
+  <div class="detail" id="d1"></div>
+</div>
+
+<div class="box">
+  <span class="status wait" id="s2">Testing...</span>
+  <div class="label">3. Bus data (Wiener Linien, HTTPS)</div>
+  <div class="detail" id="d2"></div>
+</div>
+
+<div class="box">
+  <span class="status wait" id="s3">Testing...</span>
+  <div class="label">4. Bus data (Wiener Linien, plain HTTP)</div>
+  <div class="detail" id="d3"></div>
+</div>
+
+<div class="box">
+  <div class="label">What this means</div>
+  <div id="summary">Waiting for tests to finish...</div>
+</div>
+
+<button onclick="runAll()">Run again</button>
+
+<script>
+(function () {
+  var pad = function (n) { return n < 10 ? "0" + n : "" + n; };
+
+  function tick() {
+    var d = new Date();
+    document.getElementById("clock").innerHTML =
+      pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds());
+  }
+  tick();
+  setInterval(tick, 1000);
+
+  var ua = navigator.userAgent;
+  var m = ua.match(/OS (\d+)_(\d+)/);
+  var ios = m ? "iOS " + m[1] + "." + m[2] : "unknown iOS";
+  document.getElementById("env").innerHTML =
+    ios + " | page loaded over " + location.protocol.replace(":", "").toUpperCase();
+
+  var tests = [
+    { id: 1, url: "https://api.open-meteo.com/v1/forecast?latitude=48.21&longitude=16.37&current_weather=true" },
+    { id: 2, url: "https://www.wienerlinien.at/ogd_realtime/monitor?rbl=4205" },
+    { id: 3, url: "http://www.wienerlinien.at/ogd_realtime/monitor?rbl=4205" }
+  ];
+  var results = {};
+
+  function setResult(id, ok, text) {
+    results[id] = ok;
+    var s = document.getElementById("s" + id);
+    s.className = "status " + (ok ? "ok" : "fail");
+    s.innerHTML = ok ? "OK" : "FAILED";
+    document.getElementById("d" + id).innerHTML = text;
+    summarize();
+  }
+
+  function runTest(t) {
+    var finished = false;
+    var s = document.getElementById("s" + t.id);
+    s.className = "status wait";
+    s.innerHTML = "Testing...";
+    document.getElementById("d" + t.id).innerHTML = "";
+    delete results[t.id];
+
+    var xhr = new XMLHttpRequest();
+    var timer = setTimeout(function () {
+      if (finished) return;
+      finished = true;
+      try { xhr.abort(); } catch (e) {}
+      setResult(t.id, false, "No answer after 12 seconds.");
+    }, 12000);
+
+    xhr.onreadystatechange = function () {
+      if (xhr.readyState !== 4 || finished) return;
+      finished = true;
+      clearTimeout(timer);
+      if (xhr.status >= 200 && xhr.status < 600 && xhr.status !== 0) {
+        // Any real HTTP answer proves the connection works.
+        var txt = (xhr.responseText || "").substring(0, 120);
+        setResult(t.id, true, "Server answered (HTTP " + xhr.status + "). " + txt);
+      } else {
+        setResult(t.id, false,
+          "Blocked or unreachable (status 0). Could be an old security certificate, " +
+          "a mixed-content block, or the server not allowing browser requests.");
+      }
+    };
+
+    try {
+      xhr.open("GET", t.url, true);
+      xhr.send();
+    } catch (e) {
+      finished = true;
+      clearTimeout(timer);
+      setResult(t.id, false, "Error: " + e);
+    }
+  }
+
+  function summarize() {
+    if (results[1] === undefined || results[2] === undefined || results[3] === undefined) return;
+    var msg;
+    if (results[1] && results[2]) {
+      msg = "Good news: the iPad can fetch weather and bus data directly. " +
+            "You do not need a helper at home. A single page on a free host is enough.";
+    } else if (results[1] && !results[2] && results[3]) {
+      msg = "Weather works, but bus data only works over plain HTTP. " +
+            "Serve the page from a computer at home over HTTP, or use a small helper.";
+    } else if (results[1] && !results[2] && !results[3]) {
+      msg = "Weather works but bus data does not. Likely the bus service does not allow " +
+            "direct browser requests. A small helper at home that fetches it for the iPad will fix this.";
+    } else if (!results[1] && !results[2] && !results[3]) {
+      msg = "None of the outside services could be reached. " +
+            "Check the iPad's Wi-Fi first. If Wi-Fi is fine, use a helper at home over plain HTTP.";
+    } else {
+      msg = "Mixed results. Take a screenshot of this page and send it to me, and I will work out the best route.";
+    }
+    if (location.protocol === "https:") {
+      msg += " (Note: test 4 is usually blocked when the page itself is on HTTPS.)";
+    }
+    document.getElementById("summary").innerHTML = msg;
+  }
+
+  window.runAll = function () {
+    document.getElementById("summary").innerHTML = "Waiting for tests to finish...";
+    for (var i = 0; i < tests.length; i++) { runTest(tests[i]); }
+  };
+
+  runAll();
+})();
+</script>
+</body>
+</html>
